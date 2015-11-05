@@ -1,0 +1,129 @@
+<?php
+
+/**
+ * @file
+ * myblock.module
+ */
+//описание функции показывает этот блок в спике всех блоков
+function currencylayer_block_info() {
+    // This example comes from node.module.
+    $blocks['currencylayer'] = array(
+        'info' => t('Currencylayer'),
+    );
+
+    return $blocks;
+}
+//функция отображения блока
+function currencylayer_block_view($delta = '') {
+    $block = array();
+    switch ($delta) {
+        case 'currencylayer':
+            //$block['subject'] = t('Social links');
+			$block['content'] = '';
+			//variable_set('currencylayer_error', '');
+			if(empty(variable_get('currencylayer_error', ''))){
+				$block['content'] .= '<div class="marquee">';
+				//salect rate
+				$a_currencies = db_select('currencylayer', 'cl')
+				  ->fields('cl', array('cotirovka', 'rate'))
+				  ->execute()
+				  ->fetchAll();
+				foreach($a_currencies as $currencie){
+					//dpm($currencie);
+					$block['content'] .= '<b>'.$currencie->cotirovka.'</b><span>'.$currencie->rate.'</span>';
+				}
+				$block['content'] .= '</div>';
+			}
+			else{
+				$block['content'] = variable_get('currencylayer_error', '');
+			}
+			
+            break;
+    }
+    return $block;
+}
+
+//функция настроек блока
+function currencylayer_block_configure($delta = '') {
+    // This example comes from node.module.
+    $form = array();
+    if ($delta == 'currencylayer') {
+        $form['access_key'] = array(
+            '#type' => 'textfield',
+            '#title' => t('Access key'),
+            '#size' => 60,
+            '#maxlength' => 100,
+			'#default_value' => variable_get('access_key', ''),
+			'#description' => 'Your API Access Key https://currencylayer.com/dashboard',
+			'#required' => TRUE,
+        );
+		$form['source'] = array(
+            '#type' => 'textfield',
+            '#title' => t('Source'),
+            '#size' => 60,
+            '#maxlength' => 500,
+			'#default_value' => variable_get('source', 'USD'),
+			'#description' => 'Example: USD',
+			'#required' => TRUE,
+        );
+		$form['currencies'] = array(
+            '#type' => 'textfield',
+            '#title' => t('Currencies'),
+            '#size' => 60,
+            '#maxlength' => 500,
+			'#default_value' => variable_get('currencies', ''),
+			'#description' => 'Example: AUD,CAD,PLN,MXN',
+			'#required' => TRUE,
+        );
+    }
+    return $form;
+}
+
+function currencylayer_block_save($delta = '', $edit = array()) {
+    // This example comes from node.module.
+    if ($delta == 'currencylayer') {
+        variable_set('access_key', $edit['access_key']);
+		variable_set('currencies', $edit['currencies']);
+		variable_set('source', $edit['source']);
+    }
+}
+
+function currencylayer_cron(){
+	//update rate on cron
+	if(!empty(variable_get('access_key', '')) && !empty(variable_get('source', '')) && !empty(variable_get('currencies', ''))){
+		$url = 'http://www.apilayer.net/api/live?access_key='.variable_get('access_key', '').'&currencies='.variable_get('currencies', '').'&source='.variable_get('source', 'USD').'&format=1';
+		$currencies = file_get_contents($url);
+		$a_currencies = json_decode($currencies);
+		if($a_currencies->success === TRUE){
+			//clear table
+			db_truncate('currencylayer')->execute();
+			foreach($a_currencies->quotes as $key=>$quote){
+				//insert rate table
+				db_insert('currencylayer')
+				->fields(array(
+					'cotirovka' => $key,
+					'rate' => $quote,
+					'date' => $a_currencies->timestamp,
+				))
+				->execute();
+			}
+			variable_set('currencylayer_error', '');
+		}
+		else{
+			if($a_currencies->error->code == 404)
+				variable_set('currencylayer_error', '404 - User requested a resource which does not exist.');
+			elseif($a_currencies->error->code == 101)
+				variable_set('currencylayer_error', '101 - User entered an invalid Access Key.');
+			elseif($a_currencies->error->code == 103)
+			variable_set('currencylayer_error', '103 - User requested a non-existent API Function.');
+			elseif($a_currencies->error->code == 104)
+				variable_set('currencylayer_error', '104 - User has reached or exceeded his Subscription Plan\'s monthly API Request Allowance.');
+			elseif($a_currencies->error->code == 105)
+				variable_set('currencylayer_error', '105 - The user\'s current Subscription Plan does not support the requested API Function.');
+			elseif($a_currencies->error->code == 106)
+				variable_set('currencylayer_error', '106 - The user\'s query did not return any results.');
+			else
+				variable_set('currencylayer_error', 'Underfined error');
+		}
+	}
+}
